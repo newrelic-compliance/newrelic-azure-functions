@@ -1,0 +1,52 @@
+name: 'Security Scans'
+
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Every day at 12:00 AM IST (6:30 PM UTC)
+    - cron: "30 18 * * *"
+
+permissions: {}
+
+jobs:
+  # ==========================================
+  # JOB 1: FILESYSTEM SCAN (Local Repo Scan)
+  # ==========================================
+  trivy_fs_scan:
+    name: Trivy Filesystem Scan
+    # Fork PRs get a read-only token and cannot upload SARIF
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          ignore-unfixed: true
+          severity: 'HIGH,CRITICAL'
+          limit-severities-for-sarif: true   # SARIF ignores `severity` without this
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+        env:
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
+          TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db
+
+      - name: Upload Trivy filesystem results to GitHub Security
+        if: always() && hashFiles('trivy-fs-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+          category: 'trivy-fs'
+
+  # No container image is built or published from this repository, so the
+  # image build/scan jobs from the standard do not apply (filesystem scan only).
